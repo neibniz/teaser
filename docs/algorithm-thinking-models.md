@@ -332,6 +332,109 @@ for s in sources:
 
 > 从较小的搜索前沿扩展，直到两边相遇。
 
+### 4.6 例题深析：带钥匙的迷宫最短路
+
+题目抽象：
+
+```text
+网格中有起点 S、终点 T、墙、钥匙 a/b/c、门 A/B/C。
+拿到钥匙 a 后才能通过门 A。
+问从 S 到 T 的最少步数。
+```
+
+初学者常见错误是把状态写成：
+
+```text
+(r, c)
+```
+
+这会错，因为同一个位置在“有钥匙”和“没钥匙”时，未来能力不同。优秀学生会问：
+
+> 两个局面如果位置相同，但钥匙集合不同，它们未来可走路径是否完全一样？
+
+答案是不一样。  
+所以正确状态是：
+
+```text
+(r, c, keys_mask)
+```
+
+白板推导：
+
+```text
+对象：格子、墙、钥匙、门。
+状态：(r, c, keys_mask)。
+起点：(sr, sc, 0)。
+目标：位置到达 T，钥匙集合不限。
+转移：上下左右移动；遇到钥匙更新 mask；遇到门检查 mask。
+目标类型：最少步数。
+算法：BFS。
+visited：必须记录三维状态，而不是只记录格子。
+```
+
+代码骨架：
+
+```python
+from collections import deque
+
+def shortest_path_with_keys(grid, start, target):
+    m, n = len(grid), len(grid[0])
+    q = deque([(start[0], start[1], 0, 0)])
+    visited = {(start[0], start[1], 0)}
+
+    while q:
+        r, c, keys, dist = q.popleft()
+        if (r, c) == target:
+            return dist
+
+        for dr, dc in DIR4:
+            nr, nc = r + dr, c + dc
+            if nr < 0 or nr >= m or nc < 0 or nc >= n:
+                continue
+
+            ch = grid[nr][nc]
+            if ch == "#":
+                continue
+
+            next_keys = keys
+            if "a" <= ch <= "z":
+                next_keys |= 1 << (ord(ch) - ord("a"))
+
+            if "A" <= ch <= "Z" and ch not in {"S", "T"}:
+                need = 1 << (ord(ch) - ord("A"))
+                if not (keys & need):
+                    continue
+
+            state = (nr, nc, next_keys)
+            if state in visited:
+                continue
+
+            visited.add(state)
+            q.append((nr, nc, next_keys, dist + 1))
+
+    return -1
+```
+
+不变量：
+
+> BFS 按步数递增扩展完整状态 `(r, c, keys_mask)`，所以第一次到达终点位置时就是最少步数。
+
+复杂度：
+
+```text
+如果有 k 把钥匙，状态数最多是 m * n * 2^k。
+时间复杂度 O(m*n*2^k)。
+空间复杂度 O(m*n*2^k)。
+```
+
+易错点：
+
+- `visited` 不能只记录 `(r, c)`。
+- 拿到钥匙后要更新状态再入队。
+- 经过门时要检查旧钥匙集合是否已经包含对应钥匙。
+- 如果起点/终点用大写 `S/T` 表示，不要把它们误判成需要钥匙的门。
+- BFS 入队时标记 visited，避免重复入队。
+
 ---
 
 ## 5. 网格、平面划分与连通块
@@ -399,6 +502,82 @@ def num_islands(grid):
 
 > 不直接找“被包围”，先找“肯定不被包围”。
 
+#### 例题深析：被围绕的区域
+
+题目抽象：
+
+```text
+矩阵中有 O 和 X。
+所有不连接边界的 O 都要变成 X。
+连接边界的 O 保持不变。
+```
+
+如果直接判断每个 `O` 是否被包围，会很麻烦。优秀学生会反过来问：
+
+> 哪些 O 一定不会被包围？
+
+答案是：
+
+```text
+所有能从边界 O 连通到的 O，都不会被包围。
+```
+
+推导：
+
+```text
+对象：格子。
+关系：四方向相邻。
+状态：格子位置 (r, c)。
+起点：所有边界上的 O。
+操作：从 O 走到相邻 O。
+目标：标记所有安全 O。
+算法：从边界多源 DFS/BFS。
+```
+
+代码：
+
+```python
+def solve_surrounded_regions(board):
+    if not board or not board[0]:
+        return
+
+    m, n = len(board), len(board[0])
+
+    def dfs(r, c):
+        if r < 0 or r >= m or c < 0 or c >= n:
+            return
+        if board[r][c] != "O":
+            return
+        board[r][c] = "S"
+        for dr, dc in DIR4:
+            dfs(r + dr, c + dc)
+
+    for r in range(m):
+        dfs(r, 0)
+        dfs(r, n - 1)
+    for c in range(n):
+        dfs(0, c)
+        dfs(m - 1, c)
+
+    for r in range(m):
+        for c in range(n):
+            if board[r][c] == "O":
+                board[r][c] = "X"
+            elif board[r][c] == "S":
+                board[r][c] = "O"
+```
+
+不变量：
+
+> 被标成 `S` 的格子，必然能通过一条 `O` 路径连到边界，因此不能被翻转。
+
+复杂度：
+
+```text
+每个格子最多访问常数次。
+时间 O(m*n)，空间 O(m*n) 递归栈最坏情况。
+```
+
 ### 5.4 平面划分的抽象
 
 平面划分问题可能需要先把几何结构离散成图。
@@ -453,6 +632,64 @@ def binary_search_answer(lo, hi):
 
 > 你二分的不是数组，而是什么答案？单调性在哪里？
 
+#### 例题深析：最小可行速度
+
+题目抽象：
+
+```text
+有若干堆任务，每小时以 speed 的速度处理。
+问在 h 小时内完成所有任务的最小 speed。
+```
+
+暴力思路：
+
+```text
+从 speed = 1 开始试，直到找到第一个可行速度。
+```
+
+如果最大任务量很大，暴力太慢。优秀学生会问：
+
+> 可行性是否单调？
+
+如果某个速度 `speed` 可以在 `h` 小时内完成，那么更大的速度一定也可以。  
+所以答案空间有单调性，可以二分。
+
+判定函数：
+
+```python
+def can_finish(piles, h, speed):
+    hours = 0
+    for x in piles:
+        hours += (x + speed - 1) // speed
+    return hours <= h
+```
+
+二分：
+
+```python
+def min_speed(piles, h):
+    lo, hi = 1, max(piles)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if can_finish(piles, h, mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+```
+
+不变量：
+
+> 答案始终在 `[lo, hi]` 中；当 `mid` 可行时，真正答案不会大于 `mid`；不可行时，真正答案一定大于 `mid`。
+
+复杂度：
+
+```text
+每次 check 是 O(n)。
+二分次数 O(log max(piles))。
+总复杂度 O(n log max(piles))。
+```
+
 ### 6.2 双指针
 
 双指针适合有序数组、配对、去重、合并、相向扫描。
@@ -487,6 +724,58 @@ for right, x in enumerate(nums):
 - 连续区间。
 - 最长/最短子数组。
 - 窗口条件可增量维护。
+
+#### 例题深析：最短和至少为 target 的子数组
+
+题目：
+
+```text
+给定正整数数组 nums，找和至少为 target 的最短连续子数组长度。
+```
+
+为什么可以滑动窗口？
+
+关键条件是：
+
+```text
+数组元素都是正数。
+```
+
+右端扩展时，窗口和只会变大。  
+左端收缩时，窗口和只会变小。  
+这给了我们单调性。
+
+```python
+def min_subarray_len(target, nums):
+    left = 0
+    total = 0
+    ans = float("inf")
+
+    for right, x in enumerate(nums):
+        total += x
+
+        while total >= target:
+            ans = min(ans, right - left + 1)
+            total -= nums[left]
+            left += 1
+
+    return 0 if ans == float("inf") else ans
+```
+
+不变量：
+
+> 每次进入 `while total >= target` 时，窗口 `[left, right]` 是可行窗口；不断右移 `left` 是为了找到以当前 `right` 结尾的最短可行窗口。
+
+复杂度：
+
+```text
+left 和 right 都最多移动 n 次。
+时间 O(n)，空间 O(1)。
+```
+
+反例意识：
+
+> 如果数组允许负数，窗口和不再随右扩单调增加、随左缩单调减少，这个滑动窗口思路就可能失效。
 
 ### 6.4 前缀和与差分
 
@@ -546,6 +835,64 @@ diff[r + 1] -= v
 - 贪心选的区间结束不晚于任何其他可选区间。
 - 用它替换最优解中的第一个区间，不会影响后续区间。
 - 因此选择结束最早是安全的。
+
+#### 例题深析：最多选择多少个不重叠区间
+
+题目：
+
+```text
+给定若干区间 [start, end)，选择最多数量的互不重叠区间。
+```
+
+看似合理但错误的策略：
+
+- 选开始最早的区间。
+- 选长度最短的区间。
+- 选与其他区间冲突最少的区间。
+
+优秀学生会先找反例，而不是直接相信直觉。
+
+正确策略：
+
+```text
+按结束时间从小到大排序，每次选择第一个不冲突区间。
+```
+
+代码：
+
+```python
+def max_non_overlapping_intervals(intervals):
+    intervals.sort(key=lambda x: x[1])
+    ans = 0
+    last_end = float("-inf")
+
+    for start, end in intervals:
+        if start >= last_end:
+            ans += 1
+            last_end = end
+
+    return ans
+```
+
+交换证明：
+
+```text
+设 G 是结束最早的区间。
+任取一个最优解，它的第一个区间为 A。
+因为 G 结束不晚于 A，用 G 替换 A 后，后面所有原本能接在 A 后面的区间仍能接在 G 后面。
+所以存在一个以 G 开头的最优解。
+剩下问题变成在 G 之后继续选最多区间，结构相同。
+```
+
+不变量：
+
+> 已选区间中最后一个区间的结束时间尽可能早，从而给未来留下最大空间。
+
+复杂度：
+
+```text
+排序 O(n log n)，扫描 O(n)，总 O(n log n)。
+```
 
 ### 7.3 领先性证明
 
@@ -632,6 +979,74 @@ left[i] > right[j]
 教授式总结：
 
 > 分治常常先创造结构，再利用结构批量处理跨边界关系。
+
+#### 例题深析：为什么归并能从 O(n^2) 降到 O(n log n)
+
+暴力做法：
+
+```python
+def count_reverse_pairs_bruteforce(nums):
+    ans = 0
+    for i in range(len(nums)):
+        for j in range(i + 1, len(nums)):
+            if nums[i] > nums[j]:
+                ans += 1
+    return ans
+```
+
+暴力的问题：
+
+```text
+每个左边元素都和右边元素逐个比较，没有利用任何结构。
+```
+
+归并的优秀思考：
+
+```text
+如果左右两半已经有序，跨左右比较就可以批量完成。
+```
+
+代码：
+
+```python
+def count_reverse_pairs(nums):
+    def sort_count(arr):
+        if len(arr) <= 1:
+            return arr, 0
+
+        mid = len(arr) // 2
+        left, cnt_left = sort_count(arr[:mid])
+        right, cnt_right = sort_count(arr[mid:])
+
+        merged = []
+        i = j = 0
+        cnt = cnt_left + cnt_right
+
+        while i < len(left) and j < len(right):
+            if left[i] <= right[j]:
+                merged.append(left[i])
+                i += 1
+            else:
+                merged.append(right[j])
+                cnt += len(left) - i
+                j += 1
+
+        merged.extend(left[i:])
+        merged.extend(right[j:])
+        return merged, cnt
+
+    return sort_count(nums)[1]
+```
+
+关键不变量：
+
+> 合并过程中，`left` 和 `right` 各自已经有序；当 `left[i] > right[j]` 时，`left[i:]` 全部都大于 `right[j]`。
+
+复杂度：
+
+```text
+每层合并总 O(n)，递归 O(log n) 层，总 O(n log n)。
+```
 
 ### 8.3 排序是让结构显现
 
@@ -735,6 +1150,126 @@ for w, v in items:
 ```
 
 容量从小到大，允许当前物品重复使用。
+
+### 9.6 例题深析：打家劫舍
+
+题目：
+
+```text
+一排房子，每间有金额 nums[i]，不能偷相邻房子，求最大金额。
+```
+
+暴力思路：
+
+```text
+每间房偷或不偷，枚举所有选择。
+```
+
+暴力会有 `2^n` 种选择。优秀学生会问：
+
+> 到第 i 间房时，真正影响未来的历史是什么？
+
+对于第 `i` 间房，只有两个选择：
+
+- 不偷第 `i` 间：答案来自前 `i - 1` 间。
+- 偷第 `i` 间：第 `i - 1` 间不能偷，答案来自前 `i - 2` 间再加当前金额。
+
+状态定义：
+
+```text
+dp[i] = 考虑前 i 间房子时能得到的最大金额。
+```
+
+转移：
+
+```text
+dp[i] = max(dp[i - 1], dp[i - 2] + nums[i - 1])
+```
+
+代码：
+
+```python
+def rob(nums):
+    n = len(nums)
+    dp = [0] * (n + 1)
+
+    for i in range(1, n + 1):
+        not_take = dp[i - 1]
+        take = nums[i - 1] + (dp[i - 2] if i >= 2 else 0)
+        dp[i] = max(not_take, take)
+
+    return dp[n]
+```
+
+不变量：
+
+> 处理完 `i` 后，`dp[i]` 已经是前 `i` 间房子的最优答案。
+
+复杂度：
+
+```text
+时间 O(n)，空间 O(n)，可压缩到 O(1)。
+```
+
+### 9.7 例题深析：0/1 背包为什么不能贪心
+
+题目：
+
+```text
+每个物品有重量和价值，每个最多选一次，容量为 C，求最大价值。
+```
+
+错误直觉：
+
+```text
+按价值/重量比从高到低选。
+```
+
+反例：
+
+```text
+容量 10
+物品 A：重量 6，价值 30，性价比 5
+物品 B：重量 5，价值 24，性价比 4.8
+物品 C：重量 5，价值 24，性价比 4.8
+```
+
+贪心会选 A，总价值 30。  
+最优是选 B + C，总价值 48。
+
+这说明：
+
+> 局部高性价比不能代表全局组合最优。
+
+状态定义：
+
+```text
+dp[i][c] = 只考虑前 i 个物品、容量为 c 时的最大价值。
+```
+
+转移：
+
+```text
+不选第 i 个：dp[i - 1][c]
+选第 i 个：dp[i - 1][c - w] + v
+```
+
+一维代码：
+
+```python
+def zero_one_knapsack(weights, values, capacity):
+    dp = [0] * (capacity + 1)
+
+    for w, v in zip(weights, values):
+        for c in range(capacity, w - 1, -1):
+            dp[c] = max(dp[c], dp[c - w] + v)
+
+    return dp[capacity]
+```
+
+为什么倒序？
+
+> 倒序保证 `dp[c - w]` 仍然是上一轮物品的结果，当前物品不会被重复使用。
 
 ---
 
@@ -859,6 +1394,55 @@ class DSU:
 - 最小生成树 Kruskal。
 - 等式可满足性。
 
+#### 例题深析：冗余连接
+
+题目：
+
+```text
+一棵树多加了一条边，给出所有边，找出导致成环的那条边。
+```
+
+优秀学生会先翻译操作：
+
+```text
+边一条条加入。
+每加入一条边 (u, v)，需要判断 u 和 v 是否已经连通。
+如果已经连通，再加这条边就会成环。
+如果不连通，就把两个集合合并。
+```
+
+这正是并查集的两个操作：
+
+```text
+find：查代表，判断是否同集合。
+union：合并集合。
+```
+
+代码：
+
+```python
+def find_redundant_connection(edges):
+    n = max(max(u, v) for u, v in edges)
+    dsu = DSU(n + 1)
+
+    for u, v in edges:
+        if not dsu.union(u, v):
+            return [u, v]
+
+    return []
+```
+
+不变量：
+
+> 处理完前若干条边后，并查集准确表示这些边形成的连通分量。
+
+复杂度：
+
+```text
+每条边一次 union，均摊近似 O(1)。
+总复杂度 O(n α(n))，实际可近似看成 O(n)。
+```
+
 ### 11.4 Trie 字典树
 
 Trie 适合字符串前缀。
@@ -905,6 +1489,54 @@ def next_greater(nums):
 - 柱状图最大矩形。
 - 接雨水。
 - 下一个更大/更小。
+
+#### 例题深析：每日温度
+
+题目：
+
+```text
+给定每天温度，求每一天还要等几天才会遇到更高温度。
+```
+
+暴力：
+
+```text
+每一天向后扫描直到找到更高温度，最坏 O(n^2)。
+```
+
+优秀学生会问：
+
+> 当今天温度出现时，它能帮哪些过去的天数结算？
+
+如果今天温度比栈顶那天高，就说明栈顶那天的答案找到了。  
+继续弹出所有温度更低的天。
+
+代码：
+
+```python
+def daily_temperatures(temperatures):
+    ans = [0] * len(temperatures)
+    stack = []
+
+    for i, temp in enumerate(temperatures):
+        while stack and temperatures[stack[-1]] < temp:
+            j = stack.pop()
+            ans[j] = i - j
+        stack.append(i)
+
+    return ans
+```
+
+不变量：
+
+> 栈中下标对应的温度从栈底到栈顶单调不增；它们都还没找到右侧更高温度。
+
+复杂度：
+
+```text
+每个下标最多入栈一次、出栈一次。
+时间 O(n)，空间 O(n)。
+```
 
 ### 12.2 单调队列
 
@@ -1001,6 +1633,60 @@ class Fenwick:
 
 > 每个位置维护一段长度为 lowbit 的区间贡献。
 
+#### 例题深析：用树状数组统计逆序对
+
+题目：
+
+```text
+统计 i < j 且 nums[i] > nums[j] 的数量。
+```
+
+这题也可以用归并。  
+如果从左到右扫描，还可以把问题翻译成：
+
+```text
+当前数 x 到来时，前面已经出现过多少个数比 x 大？
+```
+
+需要的操作：
+
+```text
+1. 查询已经出现过的数中，有多少个 <= x。
+2. 插入当前数 x。
+```
+
+如果数值范围大，先坐标压缩。
+
+```python
+def count_reverse_pairs_with_fenwick(nums):
+    values = sorted(set(nums))
+    rank = {x: i for i, x in enumerate(values)}
+    bit = Fenwick(len(values))
+
+    ans = 0
+    seen = 0
+    for x in nums:
+        r = rank[x]
+        leq = bit.sum_prefix(r)
+        ans += seen - leq
+        bit.add(r, 1)
+        seen += 1
+
+    return ans
+```
+
+不变量：
+
+> 扫描到当前位置前，树状数组维护了所有已出现数字的频次分布。
+
+复杂度：
+
+```text
+坐标压缩 O(n log n)。
+每个数一次查询、一次更新，各 O(log n)。
+总 O(n log n)。
+```
+
 ### 13.2 线段树
 
 适合：
@@ -1029,6 +1715,92 @@ class Fenwick:
 线段树的核心提问：
 
 > 一个大区间的答案能否由两个子区间合并出来？
+
+#### 例题深析：动态区间最小值
+
+题目：
+
+```text
+给定数组，支持两类操作：
+1. update(i, x)：把 nums[i] 改成 x。
+2. query(l, r)：查询区间 [l, r] 的最小值。
+```
+
+如果没有更新，用稀疏表或预处理可以很快。  
+但有更新后，静态结构失效。
+
+需要的操作是：
+
+```text
+单点更新 + 区间最小值查询。
+```
+
+线段树适合，因为：
+
+```text
+一个区间的最小值 = min(左子区间最小值, 右子区间最小值)
+```
+
+简化代码骨架：
+
+```python
+class SegmentTreeMin:
+    def __init__(self, nums):
+        if not nums:
+            raise ValueError("nums must be non-empty")
+        self.n = len(nums)
+        self.tree = [float("inf")] * (4 * self.n)
+        self._build(nums, 1, 0, self.n - 1)
+
+    def _build(self, nums, node, l, r):
+        if l == r:
+            self.tree[node] = nums[l]
+            return
+        mid = (l + r) // 2
+        self._build(nums, node * 2, l, mid)
+        self._build(nums, node * 2 + 1, mid + 1, r)
+        self.tree[node] = min(self.tree[node * 2], self.tree[node * 2 + 1])
+
+    def update(self, idx, value):
+        self._update(1, 0, self.n - 1, idx, value)
+
+    def _update(self, node, l, r, idx, value):
+        if l == r:
+            self.tree[node] = value
+            return
+        mid = (l + r) // 2
+        if idx <= mid:
+            self._update(node * 2, l, mid, idx, value)
+        else:
+            self._update(node * 2 + 1, mid + 1, r, idx, value)
+        self.tree[node] = min(self.tree[node * 2], self.tree[node * 2 + 1])
+
+    def query(self, ql, qr):
+        return self._query(1, 0, self.n - 1, ql, qr)
+
+    def _query(self, node, l, r, ql, qr):
+        if qr < l or r < ql:
+            return float("inf")
+        if ql <= l and r <= qr:
+            return self.tree[node]
+        mid = (l + r) // 2
+        left = self._query(node * 2, l, mid, ql, qr)
+        right = self._query(node * 2 + 1, mid + 1, r, ql, qr)
+        return min(left, right)
+```
+
+不变量：
+
+> 每个树节点始终保存它所代表区间的最小值。
+
+复杂度：
+
+```text
+build O(n)。
+update O(log n)。
+query O(log n)。
+空间 O(n)。
+```
 
 ### 13.3 懒标记 Lazy Propagation
 
