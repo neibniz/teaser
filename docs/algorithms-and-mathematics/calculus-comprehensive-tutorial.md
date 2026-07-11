@@ -56,18 +56,7 @@
 
 整套知识并不是平行的公式清单，而是一条依赖链：
 
-```mermaid
-flowchart LR
-    F["函数与图像"] --> L["极限：逼近是否稳定"]
-    L --> C["连续：极限与函数值一致"]
-    L --> D["导数：差商的极限"]
-    L --> I["积分：和式的极限"]
-    D --> A["局部线性、优化、微分方程"]
-    I --> B["面积、质量、概率、通量"]
-    D --> T["微积分基本定理"]
-    I --> T
-    T --> V["局部变化与整体累积互逆"]
-```
+![微积分知识结构：从极限到导数、积分与基本定理](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/01-calculus-knowledge-structure.png?v=20260710-final)
 
 极限是定义工具，导数和积分是两类核心对象，基本定理负责把它们连接起来。学习时如果某个求导或积分规则失去直觉，应沿依赖箭头退回极限与局部近似，而不是继续背公式。
 
@@ -252,15 +241,7 @@ f(a+h) = f(a) + f'(a)h + r(h)
 
 可以把近似层次画成：
 
-```mermaid
-flowchart LR
-    Z["0 阶：只保留 f(a)"] --> O["1 阶：加 f'(a)h"]
-    O --> S["2 阶：再加 f''(a)h²/2"]
-    S --> H["更高阶 Taylor 项"]
-    Z -->|"高度"| Z1["常数近似"]
-    O -->|"高度+斜率"| O1["切线近似"]
-    S -->|"再加入曲率"| S1["抛物线近似"]
-```
+![局部近似的阶数：常数、切线与二阶近似](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/02-local-approximation-orders.png?v=20260710-final)
 
 `h` 越小，一阶项通常越支配；离展开点较远或函数弯曲很强时，必须估计二阶及更高阶误差。
 
@@ -902,12 +883,7 @@ f(x) = x 在 (0,1) 上没有最大值和最小值。
 
 使用定理时要把“条件 -> 结论”完整保留：
 
-```mermaid
-flowchart LR
-    A["f 在闭区间 [a,b] 连续"] --> I["介值：经过端点值之间每个高度"]
-    A --> E["极值：取得最大值和最小值"]
-    I --> R["若 f(a)f(b)<0，则区间内至少有一个零点"]
-```
+![闭区间连续函数的介值定理与极值定理](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/03-continuity-theorems.png?v=20260710-final)
 
 介值定理只保证“存在”，不保证零点唯一；若还知道函数严格单调，才可进一步推出至多一个零点。极值定理保证极值被取得，不告诉我们极值在哪，导数才提供候选点搜索工具。
 
@@ -990,14 +966,7 @@ f'(a) = lim_{h -> 0} (f(a+h) - f(a)) / h
 割线斜率 -> 切线斜率
 ```
 
-```mermaid
-flowchart LR
-    A["固定点 P=(a,f(a))"] --> Q1["Q₁=(a+h₁,f(a+h₁))"]
-    Q1 --> S1["割线斜率 Δf/h₁"]
-    S1 --> Q2["令 h₂ 更小，Q₂ 更靠近 P"]
-    Q2 --> S2["割线斜率 Δf/h₂"]
-    S2 --> T["若斜率有唯一极限，定义为切线斜率 f'(a)"]
-```
+![导数的几何来源：割线趋近切线](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/04-secant-to-tangent.png?v=20260710-final)
 
 “令 `h=0`”是不允许的，因为差商分母会为零；导数来自 `h` 保持非零但任意接近零时的极限。
 
@@ -1259,12 +1228,7 @@ d/dx sin(x^2) = cos(x^2) * 2x
 
 依赖关系可视化：
 
-```mermaid
-flowchart LR
-    X["x"] -->|"g'(x)"| U["u=g(x)"]
-    U -->|"f'(u)"| Y["y=f(u)"]
-    X -->|"总变化率为路径乘积"| Y
-```
+![链式法则：变化率沿依赖路径相乘](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/05-chain-rule.png?v=20260710-final)
 
 链式法则可由差商分解理解。令 `Δu=g(x+Δx)-g(x)`：
 
@@ -1909,14 +1873,7 @@ R_n = Σ_{i=1}^n (i/n)² · (1/n)
 | 4 | 0.468750 | 0.135417 |
 | 10 | 0.385000 | 0.051667 |
 
-```mermaid
-flowchart LR
-    A["把 [a,b] 分成有限小段"] --> B["每段选样点 xᵢ*"]
-    B --> C["局部量 f(xᵢ*)Δxᵢ"]
-    C --> D["求和得到近似"]
-    D --> E["令最大分段宽度趋于 0"]
-    E --> F["若所有合适分割趋向同一值，得到定积分"]
-```
+![Riemann 和：用有限求和逼近连续面积](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/06-riemann-sum.png?v=20260710-final)
 
 严格思想不是“矩形数量真的变成无穷个”，而是有限和构成一族近似；当网格宽度趋于零时，它们是否趋向唯一极限。
 
@@ -2105,13 +2062,7 @@ F(x)=x^2
 
 这是微积分的中心桥梁。
 
-```mermaid
-flowchart LR
-    F["变化率 f(x)"] -->|"从 a 累积到 x"| A["F(x)=∫ₐˣ f(t)dt"]
-    A -->|"对上限求导"| F
-    G["总量函数 G(x)"] -->|"求导"| D["局部变化率 G'(x)"]
-    D -->|"在 [a,b] 累积"| C["G(b)-G(a)"]
-```
+![微积分基本定理：变化率与累积量互为逆过程](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/07-fundamental-theorem.png?v=20260710-final)
 
 第一部分从局部密度构造累积函数再求导；第二部分从一个原函数的局部变化率累积回端点总变化。二者共同说明导数和积分在适当条件下互逆。
 
@@ -2629,13 +2580,7 @@ lim_{N -> ∞} s_N
 
 级数研究的对象不是“无穷多个数同时相加”，而是部分和数列是否稳定：
 
-```mermaid
-flowchart LR
-    A1["s₁=a₁"] --> A2["s₂=a₁+a₂"]
-    A2 --> A3["s₃=a₁+a₂+a₃"]
-    A3 --> AN["s_N"]
-    AN --> L["若 N→∞ 时 s_N→S，则级数和为 S"]
-```
+![无穷级数：通过部分和序列判断收敛](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/08-infinite-series.png?v=20260710-final)
 
 例如几何级数 `1+1/2+1/4+...` 的部分和依次为 `1,1.5,1.75,...`，趋近 2；调和级数虽然每项趋零，部分和却持续无界增长。
 
@@ -2918,14 +2863,7 @@ Lagrange 余项给出一种可计算上界。若在 `a` 与 `x` 之间有：
 
 近似答案只有在同时给出适用区间与误差控制时，才从“数值猜测”变成可靠结论。
 
-```mermaid
-flowchart LR
-    A["选择展开点 a"] --> B["决定允许误差"]
-    B --> C["估计高阶导数上界 M"]
-    C --> D["由余项界选择阶数 n"]
-    D --> E["计算 P_n(x)"]
-    E --> F["报告近似值和误差界"]
-```
+![Taylor 多项式与 Lagrange 余项误差控制](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/09-taylor-error.png?v=20260710-final)
 
 ### 17.7 Taylor 例题拆解：为什么能做近似
 
@@ -3221,18 +3159,7 @@ f(x,0)=0
 
 更准确地说：找到两条路径结果不同，可以证明极限不存在；检查任意有限条路径结果相同，仍不能证明极限存在，因为还有无穷多条路径。
 
-```mermaid
-flowchart TD
-    P["点 (0,0)"] --> L1["路径 y=0"]
-    P --> L2["路径 y=x"]
-    P --> L3["路径 y=x²"]
-    P --> L4["任意曲线/螺旋路径"]
-    L1 --> Q{"路径极限是否不同？"}
-    L2 --> Q
-    L3 --> Q
-    Q -- 是 --> N["多变量极限不存在"]
-    Q -- 否 --> U["只能说尚未找到反例；存在性仍需统一估计"]
-```
+![二元极限：路径检验的能力与边界](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/10-multivariable-limit-paths.png?v=20260710-final)
 
 证明存在时常把表达式压成只依赖距离 `r=sqrt(x²+y²)` 的上界，再用夹逼定理让 `r->0`。
 
@@ -3389,13 +3316,7 @@ D_u f = |∇f| cos θ
 因此梯度垂直等高线切向。
 ```
 
-```mermaid
-flowchart LR
-    C["沿等高线的切向量 t"] --> Z["函数值不变：D_t f=0"]
-    Z --> P["∇f·t=0"]
-    P --> N["梯度与等高线正交"]
-    N --> M["沿 ∇f/||∇f|| 的方向导数最大"]
-```
+![梯度与等高线：最陡方向来自正交关系](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/11-gradient-contours.png?v=20260710-final)
 
 这在优化和机器学习中非常重要。
 
@@ -3572,15 +3493,7 @@ r -> y -> z
 
 这说明多变量链式法则不是死记公式，而是在依赖图上把所有路径贡献相加。
 
-```mermaid
-flowchart LR
-    R["r"] -->|"∂x/∂r=cosθ"| X["x=r cosθ"]
-    R -->|"∂y/∂r=sinθ"| Y["y=r sinθ"]
-    T["θ"] -->|"∂x/∂θ=-r sinθ"| X
-    T -->|"∂y/∂θ=r cosθ"| Y
-    X -->|"f_x"| Z["z=f(x,y)"]
-    Y -->|"f_y"| Z
-```
+![多变量链式法则：沿依赖图汇总路径贡献](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/12-multivariable-chain-rule.png?v=20260710-final)
 
 从某输入到输出的总导数等于所有有向路径上“边导数乘积”的和。这个图也是自动微分中前向/反向传播的数学骨架。
 
@@ -3658,15 +3571,7 @@ f(a+h) ≈ f(a) + 1/2 hᵀH(a)h
 所以两个梯度方向平行。
 ```
 
-```mermaid
-flowchart LR
-    G["约束曲线 g(x,y)=c"] --> T["可行移动只能沿切向 t"]
-    T --> Z["极值处 ∇f·t=0"]
-    G --> N["∇g 垂直约束切向"]
-    Z --> P["∇f 与 ∇g 平行"]
-    N --> P
-    P --> L["∇f=λ∇g"]
-```
+![Lagrange 乘子：约束极值点处的相切与梯度平行](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/13-lagrange-multipliers.png?v=20260710-final)
 
 这一推理通常要求约束点正则，即 `∇g≠0`。还要检查约束边界、端点和不可微点；拉格朗日方程给候选点，不自动保证是全局极值。
 
@@ -3836,13 +3741,7 @@ x <= y <= 1
       ∫₀¹ ∫₀ʸ f(x,y) dx dy
 ```
 
-```mermaid
-flowchart LR
-    D["先画区域 D"] --> V["竖切：固定 x，读 y 下界和上界"]
-    D --> H["横切：固定 y，读 x 左界和右界"]
-    V --> C["选择边界更少、内层更易积的一种"]
-    H --> C
-```
+![二重积分：同一区域的两种切片与积分顺序](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/14-double-integral-order.png?v=20260710-final)
 
 换序不是机械交换 `dx dy`，而是用另一组不等式重新描述同一个点集，且每个点恰好覆盖一次。
 
@@ -3995,12 +3894,7 @@ T_u Δu 与 T_v Δv
 = |∂(x,y)/∂(u,v)| du dv
 ```
 
-```mermaid
-flowchart LR
-    A["uv 平面小矩形 du×dv"] --> J["Jacobian 局部线性映射"]
-    J --> P["xy 平面小平行四边形"]
-    P --> S["面积缩放 |det J|"]
-```
+![Jacobian：局部线性映射下的面积缩放因子](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/15-jacobian-area-scaling.png?v=20260710-final)
 
 积分换元使用绝对值，因为普通面积非负；行列式符号记录方向是否翻转。若变换在区域内不是一一对应，需要分区或处理重数，否则会重复计算。
 
@@ -4269,13 +4163,7 @@ r'(t)=(1,2t)
 
 三维中，边界是曲面。
 
-```mermaid
-flowchart TB
-    F1["一维：∫ₐᵇ f'(x)dx"] --> B1["0 维边界：f(b)-f(a)"]
-    F2["二维 Green：区域内旋度"] --> B2["1 维边界：闭合曲线环流"]
-    F3["三维 Stokes：曲面上旋度通量"] --> B3["1 维边界：空间曲线环流"]
-    F4["三维散度：体内源汇"] --> B4["2 维边界：封闭曲面通量"]
-```
+![微积分统一视角：内部的导数积分由边界记录](https://oss.euler.icu/teaser/docs/algorithms-and-mathematics/calculus/16-generalized-boundary-theorems.png?v=20260710-final)
 
 共同模式是“对内部的导数对象积分，等于在有向边界上积分原对象”。方向约定不是附属符号，它保证相邻小块的内部边界互相抵消，只留下最外层边界。
 
