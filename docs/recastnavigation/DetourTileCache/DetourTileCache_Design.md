@@ -11,52 +11,36 @@
 
 校验依据：
 
-- 本文按 `DetourTileCache/Include` 和 `DetourTileCache/Source` 的当前源码核对，重点检查 `dtBuildTileCacheLayer()`、`dtTileCache::addTile()`、`addObstacle()`、`removeObstacle()`、`update()`、`queryTiles()`、`buildNavMeshTile()` 和 `DetourTileCacheBuilder.cpp` 中的 regions/contours/poly mesh 构建。
+- 本文按仓库提交 `9f4ce64` 的 `DetourTileCache/Include` 和 `DetourTileCache/Source` 核对，重点检查 layer 格式、tile/obstacle 引用、请求和更新队列、三类障碍物标记、regions/contours/poly mesh 重建、Detour tile 替换和各固定容量的截断语义。
 - 官方集成文档把 `DetourTileCache` 定位为 runtime navmesh dynamic obstacle and re-baking system；它不是查询系统，最终查询仍发生在 `dtNavMeshQuery` 上。
 - 官方 `dtTileCache` API 文档确认 `update()` 的语义是重建尚未完成的 obstacle request 所触碰的 tile，并通过 `upToDate` 告知是否追平。
 - 官方 Google Group 讨论中，Mikko Mononen 说明 TileCache 假设小 tile，典型约 32 到 64 cell square，并为快速更新做了取舍；不能期望 TileCache 生成的 mesh 与 SoloMesh 完全一致。
+- 官方论坛还明确区分了两类动态变化：箱子、桶这类“从既有可走层扣除空间”的半静态障碍适合 TileCache；房屋、多层结构或会新增可走表面的复杂几何，应收集触碰 tile 的完整静态与动态三角形后走常规 Recast tile 重建。
 
 参考链接：
 
-- https://recastnav.com/classdtTileCache.html
-- https://recastnav.com/md_Docs_2__2__BuildingAndIntegrating.html
-- https://groups.google.com/g/recastnavigation/c/oB5VFwJoB0o
+- [`dtTileCache` 官方 API](https://recastnav.com/classdtTileCache.html)
+- [官方集成文档](https://recastnav.com/md_Docs_2__2__BuildingAndIntegrating.html)
+- [官方论坛：TileCache 假设小 tile，结果不等价于 SoloMesh](https://groups.google.com/g/recastnavigation/c/oB5VFwJoB0o)
+- [官方论坛：简单障碍用 TileCache，复杂/多层几何用常规 Recast 重建](https://groups.google.com/g/recastnavigation/c/F9mRO_eimEI)
+- [官方论坛：TileCache 导出与 off-mesh connection 容易遗漏](https://groups.google.com/g/recastnavigation/c/QBH_yGOnwvs)
+
+源码覆盖关系：
+
+| 源码 | 本文对应内容 |
+| --- | --- |
+| `DetourTileCache.cpp` | cache 初始化、tile hash/free list、obstacle 请求、update 状态机、受影响 tile 查询、重建与替换 |
+| `DetourTileCacheBuilder.cpp` | layer 压缩/解压、monotone regions、轮廓、ear clipping、凸合并、顶点删除、邻接与三类 area marking |
+| `DetourTileCache.h` | 两套 salt 引用、固定请求/更新/touched 容量、allocator/compressor/mesh-process 扩展点 |
+| `DetourTileCacheBuilder.h` | layer 二进制合同、临时构建数据结构和固定六边形上限 |
 
 ## 一、整体设计
 
 TileCache 的数据流：
 
-```text
-离线或构建期:
-  heightfield layer
-      |
-      v
-  dtBuildTileCacheLayer()
-  header + compressed(heights, areas, cons)
-      |
-      v
-运行时:
-  dtTileCache::addTile()
-      |
-      v
-添加/移除 obstacle
-      |
-      v
-dtTileCache::update()
-  找受影响 compressed tiles
-  每次重建一个 navmesh tile
-      |
-      v
-dtTileCache::buildNavMeshTile()
-  decompress layer
-  mark obstacles
-  build regions
-  build contours
-  build poly mesh
-  dtCreateNavMeshData()
-  navmesh.removeTile()
-  navmesh.addTile()
-```
+![TileCache 从压缩高度层到替换 Detour navmesh tile 的运行时模型](https://oss.euler.icu/teaser/recastnavigation/DetourTileCache/Docs/Images/tilecache-runtime-model.png)
+
+> **图 1：TileCache 的持久源数据与重建闭环。** 构建期 `rcHeightfieldLayer` 被压缩为 header 与 `heights/areas/cons`，由 `dtTileCache` 长期保存；障碍变化时只解压受影响 layer、在 area 网格上重放全部 active obstacles，再执行 region、contour、poly mesh 和 `dtCreateNavMeshData()`。最右侧运行时 tile 由 `dtNavMesh` 查询，但不是下一次重建的输入，更新时会被新 tile 整体替换。
 
 关键点是：动态变化发生在“压缩高度层”的 area 标记上，而不是重新跑完整 Recast pipeline。这样适合门、箱子、临时圆柱障碍等局部变化。
 
@@ -66,13 +50,9 @@ dtTileCache::buildNavMeshTile()
 
 普通 `dtNavMesh` 保存的是最终 polygon graph。它适合查询，但不适合局部修改，因为 polygon、link、BV tree、off-mesh 等数据互相依赖。TileCache 选择保存更早一层的数据：heightfield layer 的紧凑网格。
 
-```text
-最终 navmesh tile:
-  查询快，但修改一个障碍物会牵连 polygon、link、BV、portal
+![TileCache 的压缩源、临时 layer、临时 mesh 和 Detour tile 四层模型](https://oss.euler.icu/teaser/recastnavigation/DetourTileCache/Docs/Images/tilecache-four-layer-model.png)
 
-tile cache layer:
-  查询不能直接用，但可以快速重新生成 navmesh tile
-```
+> **图 2：四层数据模型及其生命周期。** `Compressed Source` 是持久的 header 与三个 byte grid；`Temporary Layer` 是一次重建中解压并被 obstacle area marking 改写的 `dtTileCacheLayer`；`Tile Mesh` 是由 region/contour 推导出的临时凸多边形；`Detour Tile` 是加入 `dtNavMesh`、支持 link 与查询的运行时结果。图中回箭头表示变化后从压缩源重新推导并替换 Detour tile，而不是对旧 polygon graph 做原地布尔修改。
 
 这就是 TileCache 的核心设计：把动态变化放在“areas 网格”上表达，再用固定 pipeline 重新推导出 polygon mesh。
 
@@ -99,9 +79,9 @@ tile cache layer:
 
    touched 是 obstacle 的长期影响集合；pending 是当前 add/remove 请求还没完成重建的 tile 集合。两者分开，才能在逐 tile update 时正确判断 obstacle 何时从 processing 变成 processed，或从 removing 变回 empty。
 
-4. **navmesh tile 替换是按 tile 原子进行的。**
+4. **navmesh 以完整 tile 为更新单位，但 remove/add 不是事务。**
 
-   `buildNavMeshTile()` 会先生成完整新 tile data，再 remove 旧 tile，再 add 新 tile。不会在旧 tile 内原地改 polygon。这样 Detour 的 ref salt 和 link 重建机制可以自然处理失效引用。
+   `buildNavMeshTile()` 会先生成完整新 tile data，再 remove 旧 tile，再 add 新 tile，不会让查询看到“只改了一半数组”的 tile。Detour 的 salt 和 link 重建机制会让旧引用自然失效。但源码没有 rollback：如果旧 tile 已删除而新 tile `addTile()` 失败，该坐标会暂时没有 navmesh。应用必须检查 `update()`/`buildNavMeshTile()` 的 `dtStatus`，不能把“完整 tile 替换”误解成数据库式原子提交。
 
 5. **动态障碍物只改变可走性，不改变原始高度。**
 
@@ -141,7 +121,20 @@ header 描述一个压缩 layer：
 | `width/height` | 网格尺寸，通常对应 tile 的 compact heightfield layer 尺寸。 |
 | `minx/maxx/miny/maxy` | 实际有用区域的紧边界，用于 queryTiles 快速排除。 |
 
-### 3. `dtTileCacheLayer`
+### 3. `dtTileCacheParams`
+
+`dtTileCacheParams` 是压缩 layer 与最终 Detour tile 共享的空间合同：
+
+| 字段 | 进入哪一步 | 根本含义 |
+| --- | --- | --- |
+| `orig/cs/ch/width/height` | tile 坐标换算、障碍物栅格化、顶点回写 | 必须与生成 layer 时的体素网格一致，不能在运行时随意改 |
+| `walkableHeight/walkableRadius/walkableClimb` | 填入 `dtNavMeshCreateParams`；climb 还参与 layer region/contour 连通 | 它们描述这份 cache 对应的 agent 能力；原始 layer 通常已经按该半径腐蚀 |
+| `maxSimplificationError` | `dtBuildTileCacheContours()` | 动态重建时轮廓允许偏离 raw cell 边界的世界单位误差 |
+| `maxTiles/maxObstacles` | 固定池和引用 bit 分配 | 初始化后决定容量和 salt/index 编码，不能无代价扩容 |
+
+TileCache poly mesh 的 `nvp` 不是参数化的：builder 固定最多 6 个顶点，与 `DT_VERTS_PER_POLYGON` 对齐。这是它能直接交给 `dtCreateNavMeshData()` 的合同之一。
+
+### 4. `dtTileCacheLayer`
 
 解压后得到 `dtTileCacheLayer`：
 
@@ -155,7 +148,7 @@ header 描述一个压缩 layer：
 
 TileCache 的构建算法几乎都围绕这四个网格数组展开。
 
-### 4. `dtTileCacheObstacle`
+### 5. `dtTileCacheObstacle`
 
 动态障碍物支持三种形状：
 
@@ -176,14 +169,18 @@ TileCache 的构建算法几乎都围绕这四个网格数组展开。
 
 `DT_MAX_TOUCHED_TILES` 默认是 8。这是一个重要限制：单个障碍物影响的 tile 不能太多，否则超出的 tile 不会进入该 obstacle 的 touched/pending 数组。
 
+![TileCache 障碍从空闲槽到添加、稳定、移除并回收的状态机](https://oss.euler.icu/teaser/recastnavigation/DetourTileCache/Docs/Images/tilecache-obstacle-lifecycle.png)
+
+> **图 3：`dtTileCacheObstacle` 生命周期。** `addObstacle()`只把空闲槽置为 `PROCESSING` 并写入请求；`update()`计算 `touched[]`，以 `pending[]`追踪尚未重建的 tile，清空后进入 `PROCESSED`。在 processing 或 processed 状态请求删除都会进入 `REMOVING`，旧 `touched[]`重新成为 pending；全部完成后递增 `salt`并回到 `EMPTY`，使旧 `dtObstacleRef = [salt | index]`失效。四个等轴 tile 分别表示空闲槽、等待重建、稳定挖洞和等待恢复；状态机箭头表达请求与完成条件，tile 图只是对应状态的数据快照。
+
 同时源码还有两个和帧预算相关的固定上限：
 
 - `MAX_REQUESTS = 64`：一次积压的 add/remove obstacle 请求数量。
 - `MAX_UPDATE = 64`：全局待重建 tile 列表容量。
 
-如果请求或待更新 tile 超过这些容量，API 会返回失败或只处理可记录的部分。因此大面积动态变化应拆分、限流，或改走显式重建相关 tile 的流程。
+这三个上限的失败语义并不相同：请求数达到 64 时 add/remove API 明确返回 `DT_BUFFER_TOO_SMALL`；`queryTiles()` 超过 `DT_MAX_TOUCHED_TILES` 时只写前 8 个且仍返回成功；全局 `m_update` 达到 64 后，后续 touched tile 也会被跳过而没有额外错误码。后两种属于静默截断，甚至可能让 obstacle 的 `pending[]` 提前清空并进入 processed 状态。因此大面积动态变化不能只“检查 API 是否成功”，还必须从设计上限制 obstacle 与 tile 的尺寸关系，或改走常规 Recast tile 重建。
 
-### 5. 引用编码
+### 6. 引用编码
 
 TileCache 有两种引用：
 
@@ -196,7 +193,7 @@ tile ref 的 salt bits 由 `maxTiles` 决定，obstacle ref 固定高 16 bit 为
 
 删除 tile 或 obstacle 时 salt 递增，避免旧引用误命中新对象。
 
-### 6. allocator、compressor 和 mesh process
+### 7. allocator、compressor 和 mesh process
 
 TileCache 把三个工程相关能力做成接口：
 
@@ -205,6 +202,8 @@ TileCache 把三个工程相关能力做成接口：
 | `dtTileCacheAlloc` | 临时分配 layer、contour、poly mesh 等构建数据 | 调用者可以接入帧分配器或 scratch allocator，`buildNavMeshTile()` 每次会先 `reset()`。 |
 | `dtTileCacheCompressor` | 压缩/解压 `[heights|areas|cons]` 三个 byte grid | 库不绑定 FastLZ/LZ4 等具体压缩实现。 |
 | `dtTileCacheMeshProcess` | 在生成 Detour tile data 前修改 `polyAreas/polyFlags` | 应用层可把 area 映射成 Detour flags、成本或业务语义。 |
+
+压缩 layer 本身不保存 off-mesh connections。`process()` 接收可修改的 `dtNavMeshCreateParams*`，所以应用应在每次 tile 重建时按 tile 范围重新附加 `offMeshConVerts/Rad/Dir/Areas/Flags/UserID/Count`。RecastDemo 的 `Sample_TempObstacles` 就在 `MeshProcess::process()` 中这样做。若只序列化 cache layer 而没有保存并重新提供这些业务连接，重建出的 Detour tile 会缺少 off-mesh connection；这正是官方论坛中常见的导出误区。
 
 `NavMeshTileBuildContext` 是源码中的 RAII 临时上下文，持有解压 layer、contour set 和 poly mesh。`buildNavMeshTile()` 任一步失败或返回时，它都会释放这些临时对象，避免中途失败泄漏 scratch 内存。
 
@@ -304,6 +303,12 @@ data -> dtTileCacheLayerHeader
 
 `getTilesAt(tx, ty, ...)` 会返回同一平面 tile 坐标下的所有 layer；`getTileAt(tx, ty, tlayer)` 才要求 layer 精确匹配。这个设计对应 Recast layer set：同一个 xz tile 可能有多层互不连通的可走高度平台。
 
+`getTileRef()` / `getTileByRef()` 和 `getObstacleRef()` / `getObstacleByRef()` 都执行指针或 salt/index 之间的转换；ref 版本应作为跨帧身份，裸指针只在池未重建且对象仍有效时使用。`calcTightTileBounds()` 使用 header 的 `minx/maxx/miny/maxy` 得到有效 cell 的世界 AABB，`getObstacleBounds()` 则为三种 obstacle 生成候选 AABB，它们共同服务于 broad phase。
+
+compressed cache 与 `dtNavMesh` 是两个独立容器：`addTile()` 不会自动生成 Detour tile，`removeTile()` 也不会自动删除对应 Detour tile。初次加载通常在全部 compressed layers 加入后调用 `buildNavMeshTilesAt()`；流式卸载则必须由应用同时协调 cache tile、Detour tile 和仍引用它的 obstacle 请求，不能只删其中一边。
+
+TileCache 本体和 builder 临时对象同样使用成对 API：`dtAllocTileCache()/dtFreeTileCache()`、`dtAllocTileCacheContourSet()/dtFreeTileCacheContourSet()`、`dtAllocTileCachePolyMesh()/dtFreeTileCachePolyMesh()`。`dtFreeTileCacheLayer()` 通过创建它时的 `dtTileCacheAlloc` 释放，不能改用普通 `free()`。
+
 ## 五、障碍物请求和状态机
 
 ### 1. 添加障碍物
@@ -322,6 +327,8 @@ data -> dtTileCacheLayerHeader
 ### 2. 移除障碍物
 
 `removeObstacle(ref)` 也只是追加 `REQUEST_REMOVE`。这样添加和移除都被串行化到 `update()`，避免调用者在任意时刻直接修改正在重建的数据结构。
+
+返回成功只表示 remove 请求成功入队，不表示 ref 当前一定有效：`ref == 0` 被当作成功的 no-op；过期 salt 或越界 index 会在 `update()` 消费请求时被忽略。需要业务层确认对象是否仍存在时，应先用 `getObstacleByRef()` 检查，而不能把 `removeObstacle()` 的返回值当作存在性证明。
 
 ### 3. `update()` 的请求处理
 
@@ -344,6 +351,10 @@ data -> dtTileCacheLayerHeader
 2. 把它之前记录的 `touched[]` tile 加入 `m_update[]`。
 3. 写入 `pending[]`。
 
+![dtTileCache update 将障碍请求汇入去重重建队列并逐帧处理](https://oss.euler.icu/teaser/recastnavigation/DetourTileCache/Docs/Images/tilecache-update-queue.png)
+
+> **图 4：`dtTileCache::update()` 的请求队列与重建工作集。** 只有 `m_nupdate == 0` 时才批量消费 `m_reqs`：ADD 通过 `queryTiles()`生成 obstacle 的 `touched[]/pending[]`，REMOVE 把旧 `touched[]`复制为 pending；两者都把 tile ref 去重写入全局 `m_update[]`。图中的 `m_update` 卡片只代表 compressed tile ref，不携带 ADD/REMOVE 类型。每次调用只重建 `m_update[0]`，随后从所有 processing/removing obstacle 的 `pending[]`删除该 ref，并在 pending 清空时推进状态；只有 `m_reqs`和 `m_update`同时为空时 `upToDate`才为 true。
+
 ### 4. 一次 update 只重建一个 tile
 
 源码中 `update()` 每次只处理 `m_update[0]`：
@@ -358,6 +369,8 @@ data -> dtTileCacheLayerHeader
 这个设计把动态重建成本摊到多帧，避免一帧内重建大量 tile。
 
 `update(dt, navmesh, upToDate)` 的 `dt` 参数在当前源码中没有实际使用，保留它主要是为了接口形态和未来扩展。是否继续处理更多 tile 不是由 `dt` 自动决定，而是由调用者是否循环调用 `update()` 决定。需要“本帧强制追平”时，可以在外层循环直到 `upToDate == true`，但这等价于主动接受当前帧的重建成本。
+
+`upToDate` 只表示请求队列和更新队列已经排空，不表示此前每个重建都成功。当前实现即使 `buildNavMeshTile()` 返回失败，也会把该 ref 从 `m_update` 弹出并推进 pending 状态。因此调用者必须逐次检查 `update()` 返回的 `dtStatus`；只循环到 `upToDate == true` 会遗漏失败。
 
 ## 六、查询受影响 tile：`queryTiles`
 
@@ -380,9 +393,15 @@ data -> dtTileCacheLayerHeader
 
 使用 tight bounds 可以避免障碍物碰到 tile 的空白边缘时误重建。
 
+这里还有两层固定截断：`queryTiles()` 对每个 `(tx,ty)` 最多先取 32 个 layer，对最终结果只写 `maxResults` 个，而且无论是否截断都返回 `DT_SUCCESS`。`buildNavMeshTilesAt()` 同样最多构建该坐标下前 32 个 layer。正常地图通常远低于 32 层，但垂直堆叠极端场景不能依赖 status 自动报警；初始化/导入阶段应统计每个 tile 坐标的 layer 数量。
+
 ## 七、重建 navmesh tile：`buildNavMeshTile`
 
 这是 TileCache 的核心。
+
+![压缩高度层重放障碍并重建为新的 Detour navmesh tile](https://oss.euler.icu/teaser/recastnavigation/DetourTileCache/Docs/Images/tilecache-rebuild-pipeline.png)
+
+> **图 5：`dtTileCache::buildNavMeshTile()` 的单 tile 重建。** 验证 compressed tile ref 后重置临时 allocator、解压 layer，并在原始 area 网格上重放所有触碰该 tile 且处于 processing/processed 的障碍；随后依次调用 `dtBuildTileCacheRegions()`、`dtBuildTileCacheContours()`和 `dtBuildTileCachePolyMesh()`。若 `npolys == 0`，只删除旧 Detour tile；否则先让 `dtTileCacheMeshProcess`映射 flags 和业务数据，再由 `dtCreateNavMeshData()`序列化，最后 remove 旧 tile、add 新 tile 并由 `dtNavMesh`重建运行时 links。
 
 ### 1. 解压 layer
 
